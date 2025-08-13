@@ -19,7 +19,7 @@ https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.7.1
 # transformers>=4.30.0
 # torch>=2.0.0
 
-# Additional NLP dependencies
+# Additional NLP dependency
 nltk>=3.8.0
 textblob>=0.17.0
 
