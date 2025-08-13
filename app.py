@@ -25,6 +25,26 @@ except ImportError:
         PDF_AVAILABLE = False
         USE_PDFPLUMBER = False
 
+# NLP imports
+try:
+    from sklearn.feature_extraction.text import TfidfVectorizer
+    from sklearn.metrics.pairwise import cosine_similarity
+    SKLEARN_AVAILABLE = True
+except ImportError:
+    SKLEARN_AVAILABLE = False
+
+try:
+    from textblob import TextBlob
+    TEXTBLOB_AVAILABLE = True
+except ImportError:
+    TEXTBLOB_AVAILABLE = False
+
+try:
+    import nltk
+    NLTK_AVAILABLE = True
+except ImportError:
+    NLTK_AVAILABLE = False
+
 # Set style for better looking charts
 plt.style.use('default')
 sns.set_palette("husl")
@@ -41,6 +61,8 @@ if 'scores' not in st.session_state:
     st.session_state.scores = {}
 if 'reasoning' not in st.session_state:
     st.session_state.reasoning = {}
+if 'nlp_analysis' not in st.session_state:
+    st.session_state.nlp_analysis = {}
 
 # Define criteria
 criteria = {
@@ -50,6 +72,131 @@ criteria = {
     "Technical Feasibility": {"description": "Technical constraints and implementation challenges", "weight": 20},
     "Timeline Alignment": {"description": "Compatibility with project timelines and expectations", "weight": 15}
 }
+
+class NLPAnalyzer:
+    def __init__(self):
+        self.tfidf = None
+        if SKLEARN_AVAILABLE:
+            self.tfidf = TfidfVectorizer(
+                max_features=100,
+                stop_words='english',
+                ngram_range=(1, 2),
+                min_df=1
+            )
+    
+    def extract_keywords(self, text, top_k=10):
+        """Extract important keywords using TF-IDF"""
+        if not SKLEARN_AVAILABLE or not text:
+            return []
+        
+        try:
+            processed_text = self.preprocess_text(text)
+            tfidf_matrix = self.tfidf.fit_transform([processed_text])
+            feature_names = self.tfidf.get_feature_names_out()
+            tfidf_scores = tfidf_matrix.toarray()[0]
+            
+            # Get top keywords
+            top_indices = np.argsort(tfidf_scores)[::-1][:top_k]
+            keywords = [(feature_names[i], tfidf_scores[i]) for i in top_indices if tfidf_scores[i] > 0]
+            
+            return keywords
+        except:
+            return []
+    
+    def analyze_sentiment(self, text):
+        """Analyze sentiment using TextBlob"""
+        if not TEXTBLOB_AVAILABLE or not text:
+            return None
+        
+        try:
+            blob = TextBlob(text[:1000])  # Limit text length
+            polarity = blob.sentiment.polarity  # -1 (negative) to 1 (positive)
+            subjectivity = blob.sentiment.subjectivity  # 0 (objective) to 1 (subjective)
+            
+            # Convert polarity to label
+            if polarity > 0.1:
+                label = "POSITIVE"
+                confidence = 0.5 + (polarity * 0.5)
+            elif polarity < -0.1:
+                label = "NEGATIVE"
+                confidence = 0.5 + (abs(polarity) * 0.5)
+            else:
+                label = "NEUTRAL"
+                confidence = 0.5 + (0.5 - abs(polarity))
+            
+            return {
+                'label': label,
+                'confidence': min(confidence, 0.95),
+                'polarity': polarity,
+                'subjectivity': subjectivity
+            }
+        except:
+            return None
+    
+    def preprocess_text(self, text):
+        """Basic text preprocessing"""
+        if not text:
+            return ""
+        
+        # Basic cleaning
+        text = re.sub(r'\s+', ' ', text)
+        text = re.sub(r'[^\w\s\-\.]', ' ', text)
+        text = text.lower().strip()
+        
+        return text
+    
+    def extract_project_insights(self, text):
+        """Extract project-specific insights"""
+        insights = {}
+        text_lower = text.lower()
+        
+        # Technology detection
+        tech_keywords = {
+            'Python': ['python', 'django', 'flask', 'pandas', 'numpy'],
+            'JavaScript': ['javascript', 'node.js', 'react', 'vue', 'angular'],
+            'Machine Learning': ['tensorflow', 'pytorch', 'scikit-learn', 'keras', 'neural network'],
+            'Cloud': ['aws', 'azure', 'gcp', 'cloud', 'docker', 'kubernetes'],
+            'Database': ['sql', 'mongodb', 'postgresql', 'mysql', 'database']
+        }
+        
+        detected_tech = []
+        for tech, keywords in tech_keywords.items():
+            if any(kw in text_lower for kw in keywords):
+                detected_tech.append(tech)
+        
+        insights['technologies'] = detected_tech
+        
+        # Timeline detection
+        timeline_patterns = [
+            r'(\d+)\s*(week|month|year)s?',
+            r'(quarter|q[1-4])',
+            r'(january|february|march|april|may|june|july|august|september|october|november|december)',
+            r'(\d{4})'  # Year
+        ]
+        
+        timeline_mentions = []
+        for pattern in timeline_patterns:
+            matches = re.findall(pattern, text_lower)
+            timeline_mentions.extend(matches)
+        
+        insights['timeline_mentions'] = timeline_mentions[:5]  # Limit to 5
+        
+        # Budget/cost detection
+        budget_patterns = [
+            r'\$\d+[,\d]*',
+            r'\d+[,\d]*\s*dollars?',
+            r'budget.*?\$?\d+[,\d]*',
+            r'cost.*?\$?\d+[,\d]*'
+        ]
+        
+        budget_mentions = []
+        for pattern in budget_patterns:
+            matches = re.findall(pattern, text, re.IGNORECASE)
+            budget_mentions.extend(matches)
+        
+        insights['budget_mentions'] = budget_mentions[:3]  # Limit to 3
+        
+        return insights
 
 def extract_text_from_file(uploaded_file):
     """Extract text from various file formats"""
@@ -94,76 +241,112 @@ def extract_text_from_file(uploaded_file):
     except Exception as e:
         return False, "", f"Error processing file: {str(e)}"
 
-def simple_keyword_analysis(text, criteria_name):
-    """Simple keyword-based scoring"""
+def advanced_keyword_analysis(text, criteria_name, nlp_analyzer):
+    """Advanced NLP-based scoring"""
     if not text:
         return 3, "No text provided"
     
-    text_lower = text.lower()
-    
-    # Define keyword patterns for each criteria
-    keyword_patterns = {
+    # Define sophisticated criteria patterns
+    criteria_patterns = {
         "Data Requirements": {
-            "positive": ["data", "dataset", "database", "information", "analytics", "machine learning", "training"],
-            "negative": ["no data", "limited data", "poor quality"]
+            "essential_terms": ["data", "dataset", "training", "machine learning", "algorithm", "model"],
+            "positive_indicators": ["quality data", "clean data", "structured data", "data pipeline", "big data"],
+            "negative_indicators": ["no data", "limited data", "poor quality", "unstructured"]
         },
         "Problem Complexity": {
-            "positive": ["complex", "advanced", "intelligent", "automated", "optimization", "AI", "machine learning"],
-            "negative": ["simple", "basic", "manual", "straightforward"]
+            "essential_terms": ["complex", "advanced", "intelligent", "automated", "optimization"],
+            "positive_indicators": ["AI suitable", "machine learning", "pattern recognition", "predictive"],
+            "negative_indicators": ["simple", "basic", "straightforward", "manual", "rule-based"]
         },
         "Business Impact": {
-            "positive": ["revenue", "profit", "efficiency", "cost savings", "competitive advantage", "ROI", "value"],
-            "negative": ["limited impact", "marginal", "small scale"]
+            "essential_terms": ["business", "revenue", "cost", "efficiency", "productivity", "ROI"],
+            "positive_indicators": ["competitive advantage", "strategic", "scalable", "growth"],
+            "negative_indicators": ["marginal", "limited impact", "nice to have", "small scale"]
         },
         "Technical Feasibility": {
-            "positive": ["feasible", "technology", "platform", "API", "integration", "scalable", "proven"],
-            "negative": ["challenging", "difficult", "impossible", "constraints"]
+            "essential_terms": ["feasible", "technology", "platform", "infrastructure", "API"],
+            "positive_indicators": ["proven technology", "existing tools", "scalable", "maintainable"],
+            "negative_indicators": ["challenging", "complex integration", "legacy system", "constraints"]
         },
         "Timeline Alignment": {
-            "positive": ["timeline", "schedule", "deadline", "priority", "time", "realistic", "phased"],
-            "negative": ["urgent", "rushed", "unrealistic", "tight deadline"]
+            "essential_terms": ["timeline", "deadline", "schedule", "priority", "time"],
+            "positive_indicators": ["reasonable timeline", "adequate time", "phased approach"],
+            "negative_indicators": ["tight deadline", "unrealistic", "rushed", "immediate"]
         }
     }
     
-    if criteria_name not in keyword_patterns:
-        return 3, "No keyword pattern defined"
+    if criteria_name not in criteria_patterns:
+        return 3, "No pattern defined"
     
-    pattern = keyword_patterns[criteria_name]
+    pattern = criteria_patterns[criteria_name]
+    text_lower = text.lower()
     
-    # Count positive and negative keywords
-    positive_matches = sum(1 for kw in pattern["positive"] if kw in text_lower)
-    negative_matches = sum(1 for kw in pattern["negative"] if kw in text_lower)
+    # Calculate scoring components
+    essential_score = 0
+    positive_score = 0
+    negative_score = 0
     
-    # Calculate score (1-5 scale)
-    base_score = 3  # Start with neutral
-    base_score += min(positive_matches * 0.3, 2)  # Add up to 2 points for positive
-    base_score -= min(negative_matches * 0.5, 1.5)  # Subtract up to 1.5 for negative
+    # Count essential terms
+    essential_matches = [term for term in pattern["essential_terms"] if term in text_lower]
+    essential_score = min(len(essential_matches) / len(pattern["essential_terms"]) * 2, 2)
     
+    # Count positive indicators  
+    positive_matches = [term for term in pattern["positive_indicators"] if term in text_lower]
+    positive_score = min(len(positive_matches) * 0.5, 1.5)
+    
+    # Count negative indicators
+    negative_matches = [term for term in pattern["negative_indicators"] if term in text_lower]
+    negative_score = min(len(negative_matches) * 0.4, 1.2)
+    
+    # Sentiment analysis boost
+    sentiment = nlp_analyzer.analyze_sentiment(text)
+    sentiment_boost = 0
+    if sentiment:
+        if sentiment['label'] == 'POSITIVE' and sentiment['confidence'] > 0.7:
+            sentiment_boost = 0.3
+        elif sentiment['label'] == 'NEGATIVE' and sentiment['confidence'] > 0.7:
+            sentiment_boost = -0.3
+    
+    # TF-IDF keyword relevance
+    keywords = nlp_analyzer.extract_keywords(text, top_k=15)
+    relevant_keywords = [kw[0] for kw in keywords if any(term in kw[0] for term in pattern["essential_terms"])]
+    keyword_boost = min(len(relevant_keywords) * 0.1, 0.5)
+    
+    # Calculate final score
+    base_score = 2 + essential_score + positive_score - negative_score + sentiment_boost + keyword_boost
     final_score = max(1, min(5, round(base_score)))
     
-    # Generate reasoning
+    # Generate detailed reasoning
     reasoning_parts = []
-    if positive_matches > 0:
-        reasoning_parts.append(f"✓ Found {positive_matches} positive indicators")
-    if negative_matches > 0:
-        reasoning_parts.append(f"⚠ Found {negative_matches} concerns")
+    if essential_matches:
+        reasoning_parts.append(f"✓ Key terms: {', '.join(essential_matches[:3])}")
+    if positive_matches:
+        reasoning_parts.append(f"✓ Positive: {', '.join(positive_matches[:2])}")
+    if negative_matches:
+        reasoning_parts.append(f"⚠ Concerns: {', '.join(negative_matches[:2])}")
+    if relevant_keywords:
+        reasoning_parts.append(f"🔍 TF-IDF keywords: {', '.join(relevant_keywords[:2])}")
+    if sentiment and sentiment['confidence'] > 0.6:
+        reasoning_parts.append(f"😊 Sentiment: {sentiment['label']} ({sentiment['confidence']:.2f})")
     
-    reasoning = "; ".join(reasoning_parts) if reasoning_parts else "Limited relevant keywords found"
+    reasoning = "; ".join(reasoning_parts) if reasoning_parts else "Limited relevant content found"
     
     return final_score, reasoning
 
 def get_project_type(text):
-    """Simple project type detection"""
+    """Enhanced project type detection"""
     if not text:
         return "Unknown"
     
     text_lower = text.lower()
     project_indicators = {
-        'Web Application': ['web', 'website', 'webapp', 'frontend', 'backend', 'api'],
-        'Mobile Application': ['mobile', 'app', 'ios', 'android', 'smartphone'],
-        'Data Analysis': ['data', 'analytics', 'dashboard', 'reporting', 'visualization'],
-        'Machine Learning': ['ml', 'ai', 'prediction', 'classification', 'model'],
-        'Automation': ['automate', 'workflow', 'process', 'efficiency', 'streamline']
+        'Machine Learning': ['ml', 'ai', 'prediction', 'classification', 'regression', 'neural network', 'deep learning'],
+        'Web Application': ['web', 'website', 'webapp', 'frontend', 'backend', 'api', 'rest'],
+        'Mobile Application': ['mobile', 'app', 'ios', 'android', 'smartphone', 'tablet'],
+        'Data Analytics': ['data', 'analytics', 'dashboard', 'reporting', 'visualization', 'business intelligence'],
+        'Automation': ['automate', 'workflow', 'process', 'efficiency', 'streamline', 'optimize'],
+        'E-commerce': ['shop', 'store', 'payment', 'cart', 'checkout', 'inventory'],
+        'Cloud Platform': ['cloud', 'aws', 'azure', 'gcp', 'serverless', 'microservices']
     }
     
     scores = {}
@@ -175,8 +358,8 @@ def get_project_type(text):
 
 # Header
 st.title("🎯 AI Fit Scoring Dashboard")
-st.markdown("**Phase 2: With Document Processing** 📄")
-st.write("Testing document upload and text extraction capabilities")
+st.markdown("**Phase 3: With Advanced NLP Analysis** 🧠")
+st.write("Testing scikit-learn TF-IDF, TextBlob sentiment analysis, and smart keyword extraction")
 
 # Sidebar for input method
 st.sidebar.title("📋 Input Method")
@@ -186,9 +369,12 @@ input_method = st.sidebar.radio(
     key="input_method"
 )
 
+# Initialize NLP analyzer
+nlp_analyzer = NLPAnalyzer()
+
 # Document Upload Section
 if input_method == "📄 Upload Document":
-    st.subheader("📤 Document Upload & Analysis")
+    st.subheader("📤 Document Upload & Advanced NLP Analysis")
     
     uploaded_file = st.file_uploader(
         "Upload your project document",
@@ -224,6 +410,46 @@ if input_method == "📄 Upload Document":
             with col5:
                 st.metric("🎯 Detected Type", project_type)
             
+            # Advanced NLP Analysis
+            with st.expander("🧠 Advanced NLP Analysis Results"):
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    # TF-IDF Keywords
+                    if SKLEARN_AVAILABLE:
+                        keywords = nlp_analyzer.extract_keywords(extracted_text, top_k=10)
+                        if keywords:
+                            st.subheader("🔍 Top Keywords (TF-IDF)")
+                            for keyword, score in keywords:
+                                st.write(f"• **{keyword}** ({score:.3f})")
+                    
+                    # Project insights
+                    insights = nlp_analyzer.extract_project_insights(extracted_text)
+                    if insights.get('technologies'):
+                        st.subheader("💻 Detected Technologies")
+                        for tech in insights['technologies']:
+                            st.write(f"• {tech}")
+                
+                with col2:
+                    # Sentiment Analysis
+                    if TEXTBLOB_AVAILABLE:
+                        sentiment = nlp_analyzer.analyze_sentiment(extracted_text)
+                        if sentiment:
+                            st.subheader("😊 Sentiment Analysis")
+                            st.write(f"**Label:** {sentiment['label']}")
+                            st.write(f"**Confidence:** {sentiment['confidence']:.2f}")
+                            st.write(f"**Polarity:** {sentiment['polarity']:.2f} (-1 to 1)")
+                            st.write(f"**Subjectivity:** {sentiment['subjectivity']:.2f} (0 to 1)")
+                    
+                    # Timeline mentions
+                    if insights.get('timeline_mentions'):
+                        st.subheader("📅 Timeline References")
+                        for mention in insights['timeline_mentions']:
+                            if isinstance(mention, tuple):
+                                st.write(f"• {' '.join(mention)}")
+                            else:
+                                st.write(f"• {mention}")
+            
             # Document preview
             with st.expander("📖 Document Preview"):
                 preview_text = extracted_text[:1000] + "..." if len(extracted_text) > 1000 else extracted_text
@@ -232,20 +458,30 @@ if input_method == "📄 Upload Document":
             # Auto-scoring buttons
             col1, col2 = st.columns(2)
             with col1:
-                if st.button("🤖 Auto-Score Document", type="primary", key="auto_score"):
-                    with st.spinner("🔍 Analyzing document..."):
+                if st.button("🧠 Advanced NLP Scoring", type="primary", key="nlp_score"):
+                    with st.spinner("🔍 Running advanced NLP analysis..."):
                         for criteria_name in criteria.keys():
-                            score, reasoning = simple_keyword_analysis(extracted_text, criteria_name)
+                            score, reasoning = advanced_keyword_analysis(extracted_text, criteria_name, nlp_analyzer)
                             st.session_state.scores[criteria_name] = score
                             st.session_state.reasoning[criteria_name] = reasoning
+                        
+                        # Store NLP analysis
+                        st.session_state.nlp_analysis = {
+                            'project_type': project_type,
+                            'word_count': word_count,
+                            'keywords': keywords if SKLEARN_AVAILABLE else [],
+                            'sentiment': sentiment if TEXTBLOB_AVAILABLE else None,
+                            'insights': insights
+                        }
                     
-                    st.success("🎯 Auto-scoring completed!")
+                    st.success("🎯 Advanced NLP scoring completed!")
                     st.rerun()
             
             with col2:
                 if st.button("🔄 Reset Scores", key="reset"):
                     st.session_state.scores = {}
                     st.session_state.reasoning = {}
+                    st.session_state.nlp_analysis = {}
                     st.rerun()
                     
         else:
@@ -320,6 +556,24 @@ if st.session_state.scores:
             recommendation = "❌ **Not Recommended** - Consider alternative approaches."
         
         st.markdown(recommendation)
+    
+    # NLP Insights Panel
+    if st.session_state.nlp_analysis:
+        st.subheader("🧠 NLP Analysis Summary")
+        nlp_data = st.session_state.nlp_analysis
+        
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            if nlp_data.get('sentiment'):
+                st.metric("Sentiment", nlp_data['sentiment']['label'])
+        with col2:
+            if nlp_data.get('keywords'):
+                st.metric("Key Terms Found", len(nlp_data['keywords']))
+        with col3:
+            if nlp_data.get('insights', {}).get('technologies'):
+                st.metric("Technologies", len(nlp_data['insights']['technologies']))
+        with col4:
+            st.metric("Project Type", nlp_data.get('project_type', 'Unknown'))
     
     # Detailed scoring cards
     st.subheader("📋 Detailed Score Breakdown")
@@ -427,26 +681,46 @@ if st.session_state.scores:
                     'Description': criteria[criteria_name]['description']
                 })
         
+        # Add NLP analysis summary
+        if st.session_state.nlp_analysis:
+            nlp_data = st.session_state.nlp_analysis
+            summary_row = {
+                'Criteria': 'NLP_ANALYSIS_SUMMARY',
+                'Score (1-5)': 'N/A',
+                'Percentage': 'N/A',
+                'Weight': 'N/A', 
+                'Weighted Score': 'N/A',
+                'Reasoning': f"Project Type: {nlp_data.get('project_type', 'Unknown')}; Keywords: {len(nlp_data.get('keywords', []))}; Sentiment: {nlp_data.get('sentiment', {}).get('label', 'Unknown') if nlp_data.get('sentiment') else 'Unknown'}",
+                'Description': 'Advanced NLP Analysis Summary'
+            }
+            report_data.append(summary_row)
+        
         if report_data:
             df = pd.DataFrame(report_data)
             csv = df.to_csv(index=False)
             st.download_button(
-                label="📥 Download CSV Report",
+                label="📥 Download Enhanced CSV Report",
                 data=csv,
-                file_name=f"ai_fit_assessment_{pd.Timestamp.now().strftime('%Y%m%d_%H%M')}.csv",
+                file_name=f"ai_fit_nlp_assessment_{pd.Timestamp.now().strftime('%Y%m%d_%H%M')}.csv",
                 mime="text/csv"
             )
 
-# Status indicators
+# Enhanced Status indicators
 st.markdown("---")
-st.subheader("🔧 System Status")
-col1, col2, col3 = st.columns(3)
+st.subheader("🔧 Advanced System Status")
+col1, col2, col3, col4 = st.columns(4)
 with col1:
-    st.write(f"📄 **PDF Processing:** {'✅ Available' if PDF_AVAILABLE else '❌ Not Available'}")
+    st.write(f"📄 **PDF Processing:** {'✅' if PDF_AVAILABLE else '❌'}")
+    st.write(f"📄 **DOCX Processing:** {'✅' if DOCX_AVAILABLE else '❌'}")
 with col2:
-    st.write(f"📄 **DOCX Processing:** {'✅ Available' if DOCX_AVAILABLE else '❌ Not Available'}")
+    st.write(f"🔍 **TF-IDF Analysis:** {'✅' if SKLEARN_AVAILABLE else '❌'}")
+    st.write(f"😊 **Sentiment Analysis:** {'✅' if TEXTBLOB_AVAILABLE else '❌'}")
 with col3:
-    st.write(f"📊 **Visualization:** ✅ Available")
+    st.write(f"📊 **Visualization:** ✅")
+    st.write(f"🧠 **NLP Processing:** {'✅' if SKLEARN_AVAILABLE and TEXTBLOB_AVAILABLE else '❌'}")
+with col4:
+    st.write(f"📈 **Advanced Analytics:** {'✅' if SKLEARN_AVAILABLE else '❌'}")
+    st.write(f"🔤 **Text Processing:** {'✅' if NLTK_AVAILABLE else '❌'}")
 
-st.markdown("**✅ Phase 2 Complete:** Document processing capabilities added!")
-st.markdown("**🎯 Next:** If this works, we'll add basic NLP analysis (scikit-learn + textblob).")
+st.markdown("**✅ Phase 3 Complete:** Advanced NLP analysis with TF-IDF, sentiment analysis, and smart insights!")
+st.markdown("**🎯 Success:** Your AI Fit Scoring Tool now has enterprise-grade NLP capabilities!")

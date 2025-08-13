@@ -6,3 +6,6 @@ seaborn
 python-docx
 PyMuPDF
 pdfplumber
+scikit-learn
+textblob
+nltk
