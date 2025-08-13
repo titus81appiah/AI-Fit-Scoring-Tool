@@ -1,6 +1,28 @@
-# Minimal requirements.txt for testing
+# Core Streamlit and Data Processing
 streamlit>=1.28.0
 pandas>=2.0.0
 numpy>=1.24.0
 matplotlib>=3.7.0
+seaborn>=0.12.0
+
+# Document Processing Libraries
 python-docx>=1.0.1
+PyMuPDF>=1.23.0
+pdfplumber>=0.10.0
+
+# NLP and Machine Learning Libraries (Lightweight for deployment)
+spacy>=3.7.0
+scikit-learn>=1.3.0
+https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.7.1/en_core_web_sm-3.7.1-py3-none-any.whl
+
+# DEPLOYMENT OPTIMIZATION: Commenting out heavy libraries temporarily
+# transformers>=4.30.0
+# torch>=2.0.0
+
+# Additional NLP dependencies
+nltk>=3.8.0
+textblob>=0.17.0
+
+# Utility libraries
+Pillow>=9.5.0
+requests>=2.31.0
