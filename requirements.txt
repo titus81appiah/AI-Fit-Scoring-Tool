@@ -9,5 +9,3 @@ pdfplumber
 scikit-learn
 textblob
 nltk
-supabase
-python-dotenv

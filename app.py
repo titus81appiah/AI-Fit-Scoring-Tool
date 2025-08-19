@@ -3,14 +3,12 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
+import os
 import re
 import json
 from io import StringIO
 from datetime import datetime
 from typing import Dict, List, Optional, Tuple
-
-# Import authentication module
-from auth_module import auth_manager, require_auth, get_user_display_name, is_authenticated
 
 # Document processing imports
 try:
@@ -104,6 +102,14 @@ st.markdown("""
     }
     .sidebar .sidebar-content {
         background: #f8f9fa;
+    }
+    .feature-highlight {
+        background: linear-gradient(45deg, #FF6B6B, #4ECDC4);
+        color: white;
+        padding: 1rem;
+        border-radius: 10px;
+        margin: 1rem 0;
+        text-align: center;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -663,165 +669,36 @@ def score_timeline_alignment(text: str, analysis: Dict) -> Tuple[int, str]:
     
     return final_score, reasoning
 
-def render_authentication_ui():
-    """Render authentication interface"""
-    st.sidebar.title("🔐 Authentication")
-    
-    if is_authenticated():
-        user_name = get_user_display_name()
-        st.sidebar.success(f"Welcome, {user_name}!")
-        
-        if st.sidebar.button("🚪 Sign Out", key="signout"):
-            if auth_manager.sign_out():
-                st.rerun()
-        
-        return True
-    else:
-        auth_tab1, auth_tab2 = st.sidebar.tabs(["🔑 Sign In", "📝 Sign Up"])
-        
-        with auth_tab1:
-            with st.form("signin_form"):
-                email = st.text_input("Email")
-                password = st.text_input("Password", type="password")
-                
-                if st.form_submit_button("🔑 Sign In"):
-                    success, message = auth_manager.sign_in(email, password)
-                    if success:
-                        st.success(message)
-                        st.rerun()
-                    else:
-                        st.error(message)
-        
-        with auth_tab2:
-            with st.form("signup_form"):
-                full_name = st.text_input("Full Name")
-                email = st.text_input("Email")
-                password = st.text_input("Password", type="password")
-                confirm_password = st.text_input("Confirm Password", type="password")
-                
-                if st.form_submit_button("📝 Create Account"):
-                    if password != confirm_password:
-                        st.error("Passwords do not match")
-                    elif len(password) < 6:
-                        st.error("Password must be at least 6 characters")
-                    else:
-                        success, message = auth_manager.sign_up(email, password, full_name)
-                        if success:
-                            st.success(message)
-                        else:
-                            st.error(message)
-        
-        return False
-
-def render_user_dashboard():
-    """Render the user dashboard with project history"""
-    st.header(f"👋 Welcome back, {get_user_display_name()}!")
-    
-    # Get user projects
-    projects = auth_manager.get_user_projects(limit=20)
-    
-    if projects:
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            st.metric("📊 Total Projects", len(projects))
-        with col2:
-            recent_projects = [p for p in projects if 
-                             (datetime.now() - datetime.fromisoformat(p['created_at'].replace('Z', '+00:00').replace('+00:00', ''))).days <= 7]
-            st.metric("📅 This Week", len(recent_projects))
-        with col3:
-            avg_score = np.mean([p.get('overall_score', 0) for p in projects if p.get('overall_score')])
-            st.metric("⭐ Avg Score", f"{avg_score:.1f}%" if avg_score else "N/A")
-        
-        st.subheader("📁 Recent Projects")
-        
-        for project in projects[:5]:
-            with st.expander(f"🎯 {project.get('project_name', 'Unnamed Project')} - {project.get('overall_score', 0):.0f}%"):
-                col1, col2 = st.columns([3, 1])
-                with col1:
-                    st.write(f"**Type:** {project.get('project_type', 'Unknown')}")
-                    st.write(f"**Created:** {project.get('created_at', '')[:10]}")
-                    if project.get('description'):
-                        st.write(f"**Description:** {project['description'][:100]}...")
-                with col2:
-                    if st.button("🗑️ Delete", key=f"delete_{project['id']}"):
-                        success, message = auth_manager.delete_project(project['id'])
-                        if success:
-                            st.success(message)
-                            st.rerun()
-                        else:
-                            st.error(message)
-    else:
-        st.info("📈 No projects yet. Create your first AI fit assessment!")
-        st.markdown("**Get started by:**")
-        st.markdown("- 📄 Uploading a project document")
-        st.markdown("- ✍️ Using manual scoring")
-        st.markdown("- 🧠 Trying our advanced NLP analysis")
-
-@require_auth
-def save_project_to_db(project_data: Dict, scoring_data: Dict, nlp_analysis: Dict = None):
-    """Save project and scoring results to database"""
-    # Save project
-    success, message, project_id = auth_manager.save_project(project_data)
-    
-    if success and project_id:
-        # Save scoring results
-        scoring_success, scoring_message = auth_manager.save_scoring_results(
-            project_id, scoring_data, nlp_analysis
-        )
-        
-        if scoring_success:
-            st.success(f"✅ Project saved successfully! {message}")
-        else:
-            st.warning(f"Project saved but scoring failed: {scoring_message}")
-    else:
-        st.error(f"Failed to save project: {message}")
-
 def main():
     """Main application function"""
     
-    # Authentication check
-    if not render_authentication_ui():
-        st.markdown("""
-        <div class="main-header">
-            <h1>🎯 AI Fit Scoring Platform</h1>
-            <p>Intelligent assessment tool to determine if AI is the right fit for your project</p>
-        </div>
-        """, unsafe_allow_html=True)
-        
-        st.markdown("""
-        ### 🚀 Features
-        - 🧠 **Advanced NLP Analysis** - Automated scoring using machine learning
-        - 📊 **Comprehensive Scoring** - 5-criteria evaluation framework
-        - 📈 **Visual Analytics** - Charts and insights for better decision making
-        - 💾 **Project History** - Save and track your assessments
-        - 📄 **Document Processing** - Support for PDF, DOCX, TXT, MD files
-        
-        ### 🔐 Sign up now to get started!
-        """)
-        return
-    
-    # Main app logic for authenticated users
+    # Main header
     st.markdown("""
     <div class="main-header">
         <h1>🎯 AI Fit Scoring Dashboard</h1>
-        <p>Advanced NLP-powered assessment platform</p>
+        <p>Intelligent assessment tool to determine if AI is the right fit for your project</p>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    # Feature highlight banner
+    st.markdown("""
+    <div class="feature-highlight">
+        <h3>🚀 Try Our AI-Powered Analysis!</h3>
+        <p>Upload documents or manually score projects • Advanced NLP analysis • Professional visualizations • Export reports</p>
     </div>
     """, unsafe_allow_html=True)
     
     # Navigation tabs
-    tab1, tab2, tab3, tab4 = st.tabs(["🏠 Dashboard", "📄 Analyze Document", "✍️ Manual Scoring", "⚙️ Settings"])
+    tab1, tab2, tab3 = st.tabs(["📄 Document Analysis", "✍️ Manual Scoring", "ℹ️ About"])
     
     with tab1:
-        render_user_dashboard()
-    
-    with tab2:
         render_document_analysis()
     
-    with tab3:
+    with tab2:
         render_manual_scoring()
     
-    with tab4:
-        render_settings()
+    with tab3:
+        render_about_page()
 
 def render_document_analysis():
     """Document upload and analysis interface"""
@@ -922,7 +799,7 @@ def render_document_analysis():
                 st.text_area("Content Preview:", preview_text, height=200, disabled=True)
             
             # Analysis and scoring buttons
-            col1, col2, col3 = st.columns(3)
+            col1, col2 = st.columns(2)
             with col1:
                 if st.button("🧠 Advanced AI Scoring", type="primary", key="ai_score"):
                     if not project_name.strip():
@@ -945,42 +822,6 @@ def render_document_analysis():
                         st.rerun()
             
             with col2:
-                if st.button("💾 Save Project", key="save_project"):
-                    if not project_name.strip():
-                        st.error("Please enter a project name")
-                    elif not st.session_state.scores:
-                        st.error("Please run scoring analysis first")
-                    else:
-                        # Calculate overall score
-                        total_weighted_score = calculate_overall_score(st.session_state.scores)
-                        
-                        # Prepare project data
-                        project_data = {
-                            'project_name': project_name,
-                            'project_type': top_type,
-                            'description': extracted_text[:500],
-                            'overall_score': total_weighted_score,
-                            'document_name': uploaded_file.name,
-                            'word_count': word_count
-                        }
-                        
-                        # Prepare scoring data
-                        scoring_data = {
-                            'overall_score': total_weighted_score,
-                            'scoring_method': 'advanced_nlp'
-                        }
-                        
-                        # Add individual criteria scores
-                        for criteria_name in CRITERIA.keys():
-                            if criteria_name in st.session_state.scores:
-                                key_base = criteria_name.lower().replace(' ', '_')
-                                scoring_data[f'{key_base}_score'] = st.session_state.scores[criteria_name]
-                                scoring_data[f'{key_base}_reasoning'] = st.session_state.reasoning.get(criteria_name, '')
-                        
-                        # Save to database
-                        save_project_to_db(project_data, scoring_data, comprehensive_analysis)
-            
-            with col3:
                 if st.button("🔄 Reset Analysis", key="reset"):
                     st.session_state.scores = {}
                     st.session_state.reasoning = {}
@@ -1067,104 +908,66 @@ def render_manual_scoring():
                     score = st.session_state.scores[criteria_name]
                     percentage = (score - 1) / 4 * 100
                     st.write(f"• {criteria_name}: {percentage:.0f}%")
-        
-        # Action buttons
-        if st.button("💾 Save Manual Project", key="save_manual", type="primary"):
-            if not project_name.strip():
-                st.error("Please enter a project name")
-            elif not st.session_state.scores:
-                st.error("Please complete the scoring")
-            else:
-                # Calculate overall score
-                total_weighted_score = calculate_overall_score(st.session_state.scores)
-                
-                # Prepare project data
-                project_data = {
-                    'project_name': project_name,
-                    'project_type': 'Manual Assessment',
-                    'description': project_description or 'Manual scoring assessment',
-                    'overall_score': total_weighted_score
-                }
-                
-                # Prepare scoring data
-                scoring_data = {
-                    'overall_score': total_weighted_score,
-                    'scoring_method': 'manual'
-                }
-                
-                # Add individual criteria scores
-                for criteria_name in CRITERIA.keys():
-                    if criteria_name in st.session_state.scores:
-                        key_base = criteria_name.lower().replace(' ', '_')
-                        scoring_data[f'{key_base}_score'] = st.session_state.scores[criteria_name]
-                        scoring_data[f'{key_base}_reasoning'] = st.session_state.reasoning.get(criteria_name, '')
-                
-                # Save to database
-                save_project_to_db(project_data, scoring_data)
 
-def render_settings():
-    """Settings and profile management"""
-    st.subheader("⚙️ Settings & Profile")
+def render_about_page():
+    """About page with information about the tool"""
+    st.subheader("ℹ️ About AI Fit Scoring Tool")
     
-    # User profile section
-    st.write("**👤 User Profile**")
-    profile = auth_manager.get_user_profile()
-    current_user = auth_manager.get_current_user()
+    st.markdown("""
+    ### 🎯 What is AI Fit Scoring?
     
-    if current_user:
-        with st.form("profile_form"):
-            full_name = st.text_input("Full Name", 
-                                     value=profile.get('full_name', '') if profile else '')
-            company = st.text_input("Company", 
-                                   value=profile.get('company', '') if profile else '')
-            role = st.text_input("Role/Title", 
-                                value=profile.get('role', '') if profile else '')
-            
-            if st.form_submit_button("💾 Update Profile"):
-                profile_data = {
-                    'full_name': full_name,
-                    'company': company,
-                    'role': role
-                }
-                
-                success, message = auth_manager.update_user_profile(profile_data)
-                if success:
-                    st.success(message)
-                    st.rerun()
-                else:
-                    st.error(message)
+    This tool helps organizations evaluate whether AI/ML solutions are the right fit for their specific projects. 
+    Using a comprehensive 5-criteria framework, we analyze:
     
-    st.markdown("---")
+    **📊 Our Scoring Framework:**
+    """)
     
-    # Feedback section
-    st.write("**💬 Feedback**")
-    with st.form("feedback_form"):
-        feedback_type = st.selectbox("Feedback Type", 
-                                    ["General", "Bug Report", "Feature Request", "Improvement"])
-        rating = st.slider("Overall Rating", 1, 5, 4)
-        feedback_text = st.text_area("Your Feedback", 
-                                    placeholder="Tell us what you think...")
-        
-        if st.form_submit_button("📤 Submit Feedback"):
-            if feedback_text:
-                feedback_data = {
-                    'feedback_type': feedback_type.lower().replace(' ', '_'),
-                    'rating': rating,
-                    'feedback_text': feedback_text
-                }
-                
-                success, message = auth_manager.submit_feedback(feedback_data)
-                if success:
-                    st.success(message)
-                else:
-                    st.error(message)
-            else:
-                st.error("Please enter your feedback")
+    for criteria_name, criteria_info in CRITERIA.items():
+        with st.expander(f"📋 {criteria_name} ({criteria_info['weight']}% weight)"):
+            st.write(f"**Description:** {criteria_info['description']}")
+            st.write(f"**What we evaluate:** {criteria_info['detailed_description']}")
+            st.write("**Key factors we consider:**")
+            for factor in criteria_info['key_factors']:
+                st.write(f"• {factor}")
     
-    st.markdown("---")
+    st.markdown("""
+    ### 🧠 Advanced NLP Analysis
     
-    # System status
-    st.write("**🔧 System Status**")
+    Our document analysis uses cutting-edge natural language processing to:
+    
+    - **🔍 Extract Key Terms** using TF-IDF algorithms
+    - **😊 Analyze Sentiment** to understand project tone and confidence
+    - **🤖 Assess AI Readiness** by detecting AI-relevant keywords and concepts
+    - **💼 Identify Business Impact** indicators across multiple dimensions
+    - **⚙️ Evaluate Technical Feasibility** based on mentioned technologies and constraints
+    - **🎯 Detect Project Type** automatically from content analysis
+    
+    ### 📈 How to Use This Tool
+    
+    1. **📄 Document Analysis**: Upload your project documents (PDF, DOCX, TXT, MD)
+    2. **✍️ Manual Scoring**: Manually evaluate each criteria based on your knowledge
+    3. **📊 Get Results**: View comprehensive scoring, visualizations, and recommendations
+    4. **📥 Export Reports**: Download detailed CSV or JSON reports for sharing
+    
+    ### 🎯 Scoring Guide
+    
+    - **🟢 70%+ (Excellent)**: Highly recommended for AI implementation
+    - **🔵 60-69% (Good)**: Recommended with proper planning
+    - **🟡 40-59% (Moderate)**: Proceed with caution, evaluate carefully
+    - **🔴 <40% (Poor)**: Consider alternative approaches
+    
+    ### 🚀 Features
+    
+    - **No Registration Required** - Try all features immediately
+    - **Advanced NLP** - Powered by scikit-learn and TextBlob
+    - **Professional Visualizations** - Charts and graphs for presentations
+    - **Multiple Input Methods** - Document upload or manual scoring
+    - **Export Capabilities** - CSV and JSON report generation
+    - **Mobile Friendly** - Works on all devices
+    
+    ### 🔧 System Status
+    """)
+    
     col1, col2, col3 = st.columns(3)
     with col1:
         st.write(f"📄 **PDF Processing:** {'✅' if PDF_AVAILABLE else '❌'}")
@@ -1174,7 +977,20 @@ def render_settings():
         st.write(f"😊 **Sentiment Analysis:** {'✅' if TEXTBLOB_AVAILABLE else '❌'}")
     with col3:
         st.write(f"🧠 **NLP Processing:** {'✅' if SKLEARN_AVAILABLE and TEXTBLOB_AVAILABLE else '❌'}")
-        st.write(f"🔐 **Authentication:** {'✅' if auth_manager.is_initialized() else '❌'}")
+        st.write(f"📊 **Visualization:** ✅")
+    
+    st.markdown("""
+    ---
+    
+    ### 💡 Tips for Best Results
+    
+    - **Be Specific**: Provide detailed project descriptions for more accurate analysis
+    - **Include Context**: Mention technical requirements, business goals, and constraints
+    - **Consider All Criteria**: Each factor contributes to the overall AI fit assessment
+    - **Use Both Methods**: Try document analysis AND manual scoring for comparison
+    
+    **Ready to get started?** 🚀 Try uploading a project document or use manual scoring!
+    """)
 
 def calculate_overall_score(scores: Dict[str, int]) -> float:
     """Calculate weighted overall score"""
@@ -1435,19 +1251,6 @@ def generate_csv_report() -> str:
     if st.session_state.nlp_analysis:
         nlp_data = st.session_state.nlp_analysis
         
-        # Text statistics
-        text_stats = nlp_data.get('text_stats', {})
-        report_data.append({
-            'Section': 'NLP_ANALYSIS',
-            'Criteria': 'Text Statistics',
-            'Score (1-5)': 'N/A',
-            'Percentage': 'N/A',
-            'Weight': 'N/A',
-            'Weighted Score': 'N/A',
-            'Reasoning': f"Word Count: {text_stats.get('word_count', 0)}; Character Count: {text_stats.get('char_count', 0)}; Avg Sentence Length: {text_stats.get('avg_sentence_length', 0):.1f}",
-            'Analysis Date': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        })
-        
         # AI Readiness
         ai_readiness = nlp_data.get('ai_readiness', {})
         if ai_readiness:
@@ -1459,20 +1262,6 @@ def generate_csv_report() -> str:
                 'Weight': 'N/A',
                 'Weighted Score': 'N/A',
                 'Reasoning': f"High-value indicators: {ai_readiness.get('high_value_indicators', 0)}; Moderate indicators: {ai_readiness.get('moderate_value_indicators', 0)}; Low-value indicators: {ai_readiness.get('low_value_indicators', 0)}",
-                'Analysis Date': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-            })
-        
-        # Sentiment Analysis
-        sentiment = nlp_data.get('sentiment', {})
-        if sentiment:
-            report_data.append({
-                'Section': 'NLP_ANALYSIS',
-                'Criteria': 'Sentiment Analysis',
-                'Score (1-5)': 'N/A',
-                'Percentage': 'N/A',
-                'Weight': 'N/A',
-                'Weighted Score': 'N/A',
-                'Reasoning': f"Label: {sentiment.get('label', 'Unknown')}; Confidence: {sentiment.get('confidence', 0):.2f}; Polarity: {sentiment.get('polarity', 0):.2f}; Consistency: {sentiment.get('consistency', 0):.2f}",
                 'Analysis Date': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
             })
         
